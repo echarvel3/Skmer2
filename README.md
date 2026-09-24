@@ -1,7 +1,7 @@
-# Skmer2: Repeat- and Diploidy-Aware Genome-Skim Distances
+# Skmer2: Repeat- and Diploidy-Aware Genomic Distances
 *Skmer2 includes the original [Skmer](https://github.com/shahab-sarmashghi/Skmer) algorithm along with two extensions: ReSkmer (repeat-aware) and DipSkmer (diploid-aware).*
 
-# DipSkmer: Diploid-Aware Distances
+## DipSkmer: Diploid-Aware Distances
 
 DipSkmer is an update to the Skmer software which models diploidy's effect on the Jaccard Index of _k_-mer sets to calculate nucleotide diveristy within a population.
 
@@ -9,7 +9,7 @@ To use DipSkmer simply add a `-d` flag to the reference, query, or distance comm
 ```
 skmer reference ref_dir -l custom_library_name -d -theta 0.003
 ```
-# ReSkmer: Repeat-Aware Distances
+## ReSkmer: Repeat-Aware Distances
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20058489.svg)](https://doi.org/10.5281/zenodo.20058489)
 
@@ -64,7 +64,7 @@ You can download the github repository and install Skmer using the setup script.
    - ```conda install mash=2.3```
 3. Code has been only tested ```python 3.14```, this will be updated in the future.
 
-# Skmer
+## Skmer
 Skmer is a fast tool for estimating distances between genomes from low-coverage sequencing reads (genome-skims), without needing any assembly or alignment step. The paper where we have described the methods and tested Skmer on simulated short reads and SRA's from previous sequencing experiments is available online (open access):
   - [Sarmashghi, S., Bohmann, K., P. Gilbert, M. T., Bafna, V., & Mirarab, S. (2019). Skmer: assembly-free and alignment-free sample identification using genome skims. Genome Biology, 20(1), 34. https://doi.org/10.1186/s13059-019-1632-4][1]
 
