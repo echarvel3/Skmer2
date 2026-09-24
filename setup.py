@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 setup(name='skmer',
       version='3.4.0',
@@ -7,8 +7,9 @@ setup(name='skmer',
       author_email='ssarmash@ucsd.edu',
       license='BSD-3-Clause',
       url='https://github.com/echarvel3/ReSkmer',
-      packages=['skmer'],
+      packages=find_packages(),
       package_dir={'skmer': 'skmer'},
+      include_package_data=True,
       install_requires=['numpy>=1.15.1', 'scipy>=1.1.0', 'pandas>=0.23.4'],
       provides=["skmer"],
       entry_points={
