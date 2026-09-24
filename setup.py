@@ -1,10 +1,10 @@
 from setuptools import setup, find_packages
 
 setup(name='skmer',
-      version='3.4.0',
+      version='0.2.0',
       description='Assembly-free and alignment-free tool for estimating genomic distances between genome-skims',
-      author='Shahab Sarmashghi',
-      author_email='ssarmash@ucsd.edu',
+      author='Eduardo Charvel',
+      author_email='echarvel3@gmail.com',
       license='BSD-3-Clause',
       url='https://github.com/echarvel3/ReSkmer',
       packages=find_packages(),
