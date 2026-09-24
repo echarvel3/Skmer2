@@ -1,3 +1,6 @@
+# Skmer2: Repeat- and Diploidy-Aware Genome-Skim Distances
+*Skmer2 includes the original [Skmer](https://github.com/shahab-sarmashghi/Skmer) algorithm along with two extensions: ReSkmer (repeat-aware) and DipSkmer (diploid-aware).*
+
 # DipSkmer: Diploid-Aware Distances
 
 DipSkmer is an update to the Skmer software which models diploidy's effect on the Jaccard Index of _k_-mer sets to calculate nucleotide diveristy within a population.
