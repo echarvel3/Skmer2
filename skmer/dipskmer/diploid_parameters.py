@@ -3,7 +3,7 @@ import errno
 import math
 import sys
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import minimize, newton
 
 from subprocess import run
 
@@ -21,30 +21,19 @@ def estimate_theta_from_ref(lam, eps, k, count):
         theta = default_theta
     return(theta)
 
-def get_theta_arr(i, count):
-    r =  count[i + 1] / count[i]
-    rn =  count[i + 2] / count[i+1]
-    if (8 * (2 + i) * rn > 9 * (1 + i) * r) or (theta_arg is not None):
-        theta = default_theta if (theta_arg is None) else theta_arg
-        Q = (1-theta)**k
-        xi = minimize(lambda x: (r+x*(-2* np.exp(x)+2* (-2**i+np.exp(x)) * Q)/((1+i)* (2* np.exp(x)+(2**i-2* np.exp(x))*Q )))**2, 0.5, bounds = [[0,100]]).x[0]
-
-
 def estimate_diploid_cov(sample, count, k, e, l, theta_arg):
     ind = min(count.index(max(count[2:])), len(count) - 2)
     
-    if False:
-        iters = 30
-        #print(np.array([get_theta_arr(x, count) for x in range(iters)]))
-
     if (ind < 2):
         eps = e if (e is not None) else default_error_rate
         theta = default_theta if (theta_arg is None) else theta_arg
         p0 = np.exp(-k * eps)
         r21 = 1.0 * count[2] / count[1]
         cov = newton(cov_temp_func, 0.05, args=(r21, p0, k, l)) 
+        # coverage is reported for both haplotypes below, so lam is the coverage of one
+        lam = cov * (l - k) / l / 2.0
         sys.stderr.write('[WARNING] Not enough information to co-estimate coverage, theta, and error rate of {0}; '.format(sample) +
-                         'Using {0} as default error rate and {1} as theta\n'.format(theta))
+                         'Using {0} as default error rate and {1} as theta\n'.format(eps, theta))
     else:
         r =  count[ind + 1] / count[ind]
         rn =  count[ind + 2] / count[ind+1]

@@ -1,4 +1,5 @@
 import os
+import gzip
 import random
 import fnmatch
 import errno
@@ -8,13 +9,16 @@ import math
 import multiprocessing as mp
 import numpy as np
 import pyfastx
-from subprocess import run
+import shutil
+from itertools import islice
+from shutil import which
+from subprocess import run, DEVNULL
 
 from skmer.config import *
-from skmer.utils import sequence_stat, sketch, write_error_file, assign_skmer_label
+from skmer.utils import sequence_stat, sketch, write_error_file, assign_skmer_label, count_kmers, check_all_assemblies
 from skmer.skmer import estimate_skmer_dist
 from skmer.dipskmer import estimate_dipskmer_dist
-from skmer.reskmer import parse_reference, estimate_reskmer_dist
+from skmer.reskmer import parse_reference, build_assembly_spectra, estimate_reskmer_dist
 from skmer.estimate_parameters import estimate_cov
 
 def create_sketch_dir(sequence, lib, ce, ge, ee, le,  nth):
@@ -52,33 +56,101 @@ def estimate_stats(sequence, nth):
         l = l
     return sample, cov, g_len, eps, l, n_reads
 
-def sample_reads(sequence, seed, bl_sz, bs_dir):
-    #print(sequence, seed, bl_sz, bs_dir)
-    try:
-        os.makedirs(bs_dir)
-    except OSError as Error:
-        if Error.errno != errno.EEXIST:
-            raise
-
+def sample_reads_python(sequence, seed, bl_sz, bs_rep):
+    '''seeded two-pass sampling of fastq reads in pure python (used only if seqkit is not installed)'''
     opener = gzip.open if sequence.endswith('gz') else open
-    basename = os.path.split(sequence)[-1]
-    if sequence.endswith('.gz'):
-        basename = basename[:-3]
-    bs_rep = os.path.join(bs_dir, basename)
 
     # First pass: count total reads
     with opener(sequence, 'rt') as f:
         total = sum(1 for _ in f) // 4
 
-    # Reservoir sample read indices
-    #random.seed(seed)
-    chosen = set(random.sample(range(total), min(bl_sz, total)))
+    # Choose read indices
+    chosen = set(random.Random(int(seed)).sample(range(total), min(bl_sz, total)))
 
     # Second pass: write sampled reads
     with opener(sequence, 'rt') as fin, open(bs_rep, 'w') as fout:
         for i, lines in enumerate(zip(*[fin]*4)):
             if i in chosen:
                 fout.writelines(lines)
+
+def sample_reads(sequence, seed, bl_sz, bs_dir):
+    '''subsamples bl_sz reads (without replacement) from a fasta/fastq file into bs_dir using seqkit'''
+    try:
+        os.makedirs(bs_dir)
+    except OSError as Error:
+        if Error.errno != errno.EEXIST:
+            raise
+
+    basename = os.path.split(sequence)[-1]
+    if sequence.endswith('.gz'):
+        basename = basename[:-3]
+    bs_rep = os.path.join(bs_dir, basename)
+
+    if which("seqkit") is None:
+        sys.stderr.write('[!WARNING!] seqkit not found, sampling reads with python (slower).\n')
+        sample_reads_python(sequence, seed, bl_sz, bs_rep)
+        return
+
+    # NOTE: -2 (two-pass) returns exactly bl_sz reads, and does not hold the reads in memory.
+    run(["seqkit", "sample", "-n", str(bl_sz), "-s", str(seed), "-2", "-j", "1", "-o", bs_rep, sequence],
+        check=True, stderr=DEVNULL)
+
+def is_fastq(sequence):
+    '''checks whether a (possibly gzipped) sequence file is a fastq'''
+    opener = gzip.open if sequence.endswith('gz') else open
+    with opener(sequence, 'rb') as f:
+        return f.read(1) == b'@'
+
+def choose_reads(n_reads, bl_sz, seeds):
+    '''returns an array where bit r of read i is set if read i is in replicate r, which has exactly bl_sz reads
+    chosen without replacement using seeds[r]. Choices depend only on the seed, not on the other replicates.'''
+    chosen = np.zeros(n_reads, dtype=np.uint32)
+    for r, seed in enumerate(seeds):
+        reads = np.random.default_rng(int(seed)).choice(n_reads, size=min(bl_sz, n_reads), replace=False)
+        chosen[reads] |= np.uint32(1 << r)
+    return chosen
+
+def sample_reads_multi(sequence, seeds, bl_sz, n_reads, bs_dirs, block_sz = 100000):
+    '''writes one subsample of bl_sz reads per seed (in bs_dirs) from a fastq file with a single pass over the file.
+    Reading the input once for many replicates, instead of once or twice per replicate, saves most of the IO of subsample.'''
+    if len(seeds) > 32:
+        raise ValueError('At most 32 replicates can be sampled in one pass')
+    chosen = choose_reads(n_reads, bl_sz, seeds)
+
+    opener = gzip.open if sequence.endswith('gz') else open
+    basename = os.path.split(sequence)[-1]
+    if sequence.endswith('.gz'):
+        basename = basename[:-3]
+    outputs = []
+    for bs_dir in bs_dirs:
+        try:
+            os.makedirs(bs_dir)
+        except OSError as Error:
+            if Error.errno != errno.EEXIST:
+                raise
+        outputs.append(open(os.path.join(bs_dir, basename), 'wb'))
+
+    try:
+        n_read = 0
+        with opener(sequence, 'rb') as fin:
+            while True:
+                # reads are 4 lines each
+                lines = list(islice(fin, 4 * block_sz))
+                if not lines:
+                    break
+                n_block = len(lines) // 4
+                if len(lines) % 4 != 0 or n_read + n_block > n_reads:
+                    raise ValueError('{0} does not have {1} complete fastq reads'.format(sequence, n_reads))
+                block = chosen[n_read:n_read + n_block]
+                for r, fout in enumerate(outputs):
+                    for j in np.flatnonzero((block >> r) & 1):
+                        fout.writelines(lines[4 * j:4 * j + 4])
+                n_read += n_block
+        if n_read != n_reads:
+            raise ValueError('{0} has {1} reads, expected {2}'.format(sequence, n_read, n_reads))
+    finally:
+        for fout in outputs:
+            fout.close()
 
 #def sample_reads(sequence, seed, bl_sz, bs_dir):
 #    print(sequence, seed, bl_sz, bs_dir)
@@ -182,6 +254,20 @@ def subsample(args):
     ### Choose procedure for reads or assemblies ###
     sys.stderr.write('[{0}] Input processed as {1}...\n'.format(skmer_ver, input_data))
 
+    # If inputs are assemblies, each assembly's jellyfish histogram is its repeat spectrum
+    asm_spectra_lib = os.path.join(args.sub, 'spectra')
+    if args.r == assemblies_keyword:
+        check_all_assemblies(read_len)
+        for seq, sample in zip(sequences, samples_names):
+            sample_dir = os.path.join(asm_spectra_lib, sample)
+            try:
+                os.makedirs(sample_dir)
+            except OSError as Error:
+                if Error.errno != errno.EEXIST:
+                    raise
+            count_kmers(sample_dir, sample, seq, args.k, args.p)
+        ref_hist = build_assembly_spectra({sample: asm_spectra_lib for sample in samples_names})
+
     # Compute block size
 
     np.random.seed(args.S)
@@ -211,9 +297,28 @@ def subsample(args):
 
     # Computing replicates
     #print(args.b)
+    first_rep = args.i
     for b in range (0, args.b):
 
         sys.stderr.write('[{0}] Computing replicate {1} using {2} processors...\n'.format(skmer_ver, b, n_pool))
+
+        # Sampling reads for a chunk of replicates with a single pass over each input file
+        if input_data == 'reads' and b % args.chunk == 0:
+            chunk_b = list(range(b, min(b + args.chunk, args.b)))
+            chunk_dirs = [os.path.join(args.sub, "rep" + str(first_rep + c)) for c in chunk_b]
+            pool_sample = mp.Pool(n_pool)
+            results_sample = []
+            for seq in sequences:
+                name = (os.path.split(seq)[-1]).rsplit('.f', 1)[0]
+                if is_fastq(seq):
+                    results_sample.append(pool_sample.apply_async(sample_reads_multi, args=(seq, [rand_seed_list[c] for c in chunk_b], bs_block_sz[name], sample_read_cnt[name], chunk_dirs)))
+                else:
+                    # fasta reads are sampled by seqkit, one replicate at a time
+                    results_sample += [pool_sample.apply_async(sample_reads, args=(seq, rand_seed_list[c], bs_block_sz[name], d)) for c, d in zip(chunk_b, chunk_dirs)]
+            for result in results_sample:
+                result.get(int(9999999))
+            pool_sample.close()
+            pool_sample.join()
 
         # Creating replicate directory
         sub_rep = os.path.join(args.sub, "rep" + str(args.i))
@@ -235,7 +340,8 @@ def subsample(args):
                 raise
 
         # Update paths for subsampled replicate
-        bs_sequences = [os.path.join(sub_rep, os.path.split(seq)[-1]) for seq in sequences]
+        # (subsampled reads are not gzipped)
+        bs_sequences = [os.path.join(sub_rep, os.path.split(seq)[-1][:-3] if seq.endswith('.gz') else os.path.split(seq)[-1]) for seq in sequences]
 
 
         # Creating a config file for subsample  replicate
@@ -251,15 +357,6 @@ def subsample(args):
 
         # Update  coverage and error estimates for subsample
         if input_data == 'reads':
-
-            # Generate subsample replicates and save to bootstrap directory
-            pool_sketch = mp.Pool(n_pool)
-            results_sketch = [pool_sketch.apply_async(sample_reads, args=(seq, rand_seed_list[b], bs_block_sz[(os.path.split(seq)[-1]).rsplit('.f', 1)[0]], sub_rep)) for seq in sequences]
-            for result in results_sketch:
-                result.get(int(9999999))
-            pool_sketch.close()
-            pool_sketch.join()
-
 
             # Computing coverage, genome length, error rate, and read length of replicates  using reference function
             pool_cov = mp.Pool(n_pool)
@@ -350,7 +447,10 @@ def subsample(args):
             pool_sketch.close()
             pool_sketch.join()
 
-
+            # Copy histograms of assemblies into replicate library (used by reskmer distances)
+            if args.r == assemblies_keyword:
+                for sample in samples_names:
+                    shutil.copy(os.path.join(asm_spectra_lib, sample, sample + '.hist'), os.path.join(sub_lib, sample))
 
             # Sketching genomes
             pool_sketch = mp.Pool(n_pool)
@@ -487,7 +587,7 @@ def correction(args):
             result_dfm['n_s1'] = result_dfm['n_s1'].apply(pd.to_numeric, errors='coerce')
             result_dfm['n_s2'] = result_dfm['n_s2'].apply(pd.to_numeric, errors='coerce')
             result_dfm['N_mean'] = result_dfm[['n_s1', 'n_s2']].mean(axis=1, skipna=True)
-            combo_result_df = combo_result_df.append(result_dfm, ignore_index = True)
+            combo_result_df = pd.concat([combo_result_df, result_dfm], ignore_index = True)
             #print(combo_result_df)
 
     except:

@@ -8,6 +8,8 @@ import numpy as np
 from numpy import random
 from subprocess import call, check_output, STDOUT
 
+from skmer.config import assemblies_keyword
+
 def genome_size_correction(ref_hist, ref_names, ref_lengths):
     '''scale repeat spectrum bins by genome size'''
     for sample in ref_names:
@@ -61,11 +63,29 @@ def smooth_repeat_spectrum(ref_hist, ref_names):
                 break
     return(ref_hist)
 
+def build_assembly_spectra(sample_libs):
+    '''combines the jellyfish histogram of each assembly (sample_libs: sample -> library directory) into a repeat spectrum
+    dataframe: multiplicity in column 0, followed by one column of k-mer counts per sample'''
+    spectra = []
+    for sample, lib in sample_libs.items():
+        hist = pd.read_csv(os.path.join(lib, sample, sample + '.hist'), sep=' ', header=None)
+        # jellyfish histograms are padded with empty bins up to the maximum multiplicity
+        hist = hist[hist.iloc[:, 1] > 0]
+        spectra.append(pd.Series(hist.iloc[:, 1].values, index=hist.iloc[:, 0].values, name=sample))
+    ref_hist = pd.concat(spectra, axis = 1).fillna(0).astype('int64')
+    ref_hist = ref_hist.sort_index()
+    ref_hist.insert(0, 0, ref_hist.index.astype('float64'))
+    ref_hist = ref_hist.reset_index(drop = True)
+    return ref_hist
+
 def parse_reference(reference_path, k, nth, library, skmer_ver, correct_bin_size = True, smooth_spectrum = True):
     '''read either input assembly, histogram, or respect dataframe'''
     sys.stderr.write('[{0}] Parsing repeat spectrum with {1} processors...\n'.format(skmer_ver, nth))
     ext = reference_path.split('.')[-1]
     ref_hist = None
+    # assemblies use their own repeat spectra, which are built after their k-mers are counted (see build_assembly_spectra)
+    if reference_path == assemblies_keyword:
+        return None
     # read jellyfish histogram
     if (ext == 'hist'):
         ref_hist = pd.read_csv(reference_path, sep = ' ', header = None)

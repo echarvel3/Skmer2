@@ -73,7 +73,7 @@ def estimate_cov(sequence, lib, k, e, nth, skmer_ver, ref_hist = None, theta = N
         cov = "NA"
         g_len = "NA"
         eps = "NA"
-        theta = "NA" if (skmer_ver == "dipskmer") else None
+        theta = "NA" if (skmer_ver == "dipskmer" or skmer_ver == "reskmer + dipskmer") else None
 
     write_error_file(info_file, cov, g_len, eps, l, theta)
     return(sample, cov, g_len, eps, l, theta)

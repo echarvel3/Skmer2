@@ -10,8 +10,8 @@ import shutil
 
 from skmer.config import *
 from skmer.estimate_parameters import estimate_cov
-from skmer.utils import get_samples_from_files, write_config_file, assign_skmer_label, sketch
-from skmer.reskmer import parse_reference, estimate_reskmer_dist
+from skmer.utils import get_samples_from_files, write_config_file, assign_skmer_label, sketch, check_all_assemblies
+from skmer.reskmer import parse_reference, build_assembly_spectra, estimate_reskmer_dist
 from skmer.dipskmer import estimate_dipskmer_dist
 from skmer.skmer import estimate_skmer_dist
 
@@ -71,6 +71,11 @@ def reference(args):
         read_len[name] = read_length
         if (skmer_ver == "dipskmer") or (skmer_ver == "reskmer + dipskmer"):
             theta[name] = theta_val
+
+    # If inputs are assemblies, each assembly's jellyfish histogram is its repeat spectrum
+    if args.r == assemblies_keyword:
+        check_all_assemblies(read_len)
+        ref_hist = build_assembly_spectra({name: args.l for name in samples_names})
 
     # Sketching genome-skims
     sys.stderr.write('[{0}] Sketching sequences using {1} processors...\n'.format(skmer_ver, n_proc_cov))
@@ -187,6 +192,9 @@ def distance(args):
                     for r1 in refs for r2 in refs]
     elif args.r is not None:
         ref_hist=parse_reference(args.r, kl, args.p, args.library, skmer_ver)
+        if args.r == assemblies_keyword:
+            check_all_assemblies(read_len)
+            ref_hist = build_assembly_spectra({ref: args.library for ref in refs})
         results_dist = [pool_dist.apply_async(estimate_reskmer_dist, args=(r1, r2, args.library, args.library, cov_est, len_est,
                                                                err_est, read_len, kl, coverage_threshold, args.t, ref_hist))
                     for r1 in refs for r2 in refs]
@@ -279,7 +287,7 @@ def query(args):
             err_est[ref] = float(info.split('\n')[2].split('\t')[1])
             read_len[ref] = int(info.split('\n')[3].split('\t')[1])
             if is_diploid:
-                theta[ref] = int(info.split('\n')[4].split('\t')[1])
+                theta[ref] = float(info.split('\n')[4].split('\t')[1])
             
 
     # Number of pools for multi-processing
@@ -302,12 +310,19 @@ def query(args):
     if (skmer_ver == "dipskmer") or (skmer_ver == "reskmer + dipskmer"):
         theta[name] = theta_val
 
+    # If inputs are assemblies, each assembly's jellyfish histogram is its repeat spectrum
+    if args.r == assemblies_keyword:
+        check_all_assemblies(read_len)
+        sample_libs = {ref: args.library for ref in refs}
+        sample_libs[sample] = os.getcwd()
+        ref_hist = build_assembly_spectra(sample_libs)
+
     # Sketching the query genome-skim
     sys.stderr.write('[{0}] Sketching the genome-skim...\n'.format(skmer_ver))
-    if args.r is not None:
-        sketch(args.input, os.getcwd(), cov_est, err_est, kl, ss, coverage_threshold, seed, True)
     if is_diploid:
         sketch(args.input, os.getcwd(), cov_est, err_est, kl, ss, dip_coverage_threshold, seed, False, True, read_len)
+    elif args.r is not None:
+        sketch(args.input, os.getcwd(), cov_est, err_est, kl, ss, coverage_threshold, seed, True)
     else:
         sketch(args.input, os.getcwd(), cov_est, err_est, kl, ss, coverage_threshold, seed, False)
 

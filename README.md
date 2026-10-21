@@ -52,17 +52,24 @@ skmer distance library -t -o jc-dist-mat -r /path/to/assembly_counts.hist
 
 skmer subsample ref_dir -r /path/to/assembly.fna
 ```
+If **all** of your inputs are genome assemblies, use `-r assemblies` and ReSkmer will use each assembly's own _k_-mer repeat spectrum (computed with jellyfish) instead of requiring a spectrum file. Mixing reads and assemblies with `-r assemblies` is an error.
+```
+skmer reference assembly_dir -l assembly_library -r assemblies
+```
 
 Installation
 ------------
 You can download the github repository and install Skmer using the setup script. 
-1. Conda environment has been included for easy installation: ``` conda env create -n reskmer -f ./data/conda_environment/environment.yml```
+1. Conda environment has been included for easy installation: ``` conda env create -n reskmer -f ./data/conda_environment/environment.yml```, then run ```pip install .``` from the repository directory.
 2. Alternatively, install dependencies manually:
-   - ```conda install pandas=2.3.3```
-   - ```conda install scipy=1.17```
-   - ```conda install kmer-jellyfish=2.3.1```
-   - ```conda install mash=2.3```
-3. Code has been only tested ```python 3.14```, this will be updated in the future.
+   - ```conda install -c conda-forge -c bioconda numpy pandas scipy pyfastx kmer-jellyfish=2.3.1 mash=2.3 seqkit```
+3. Code has been tested with ```python 3.10 - 3.12``` and ```pandas 2/3```.
+
+#### Testing your installation
+```
+skmer test
+```
+checks that all dependencies are installed (python modules, jellyfish, mash, seqkit), runs the unit tests (if you installed from the repository and have `pytest`), and runs every command (`reference`, `query`, `distance`, `subsample`, ReSkmer with RESPECT spectra and with assemblies, DipSkmer, and `pop`) on the test data in `data/`. It prints a PASS/FAIL table and exits with a non-zero status if anything fails. Use `skmer test --quick` to only check dependencies and run the unit tests, and `skmer test --keep` to keep the output files. The unit tests can also be run directly with `pytest` from the repository directory.
 
 ## Skmer
 Skmer is a fast tool for estimating distances between genomes from low-coverage sequencing reads (genome-skims), without needing any assembly or alignment step. The paper where we have described the methods and tested Skmer on simulated short reads and SRA's from previous sequencing experiments is available online (open access):
@@ -126,6 +133,20 @@ To see the complete list of inputs and options, run `skmer subsample -h`.
 #### Helpful tips:
 - **Job parallelization:** Combinations of `-b` and `-i` allows a flexible job parallelization. For example, to test large dataset user can run subsampling in chunks by specifying `-b 10 -i 0 -S 14500` (generates 10 subreplicates starting at index 0 such as first repository is rep0 and others are rep1, rep2 ... rep9), `-b 10 -i 10 -S 13800` (generates 10 replicates starting at index 10 such as subrepicates are rep10, rep11 ... rep19). Here we note that since internally Skmer uses default seed 42 when subsampling job is split **_variable seed is needed to be specified_** otherwise replicates will come out the same.
 - **Sample uniformity:** At the moment subsample only works for cases where all samples are either assemblies or sequencing reads. If there is a need to run a combination the user can simulate sequencing reads from assemblies. We recommnd tool such as [ART][6] for this purpose.
+
+Each replicate samples `reads^c` reads (without replacement, seeded). To limit IO, the reads of `-chunk` replicates (default 10) are sampled together with a single pass over each input file, so every input is read `b / chunk` times instead of once or twice per replicate. Larger values read the inputs fewer times but keep more subsampled files on disk at once (`-chunk` replicates times the subsample size, per input). Replicates are reproducible for a given seed and do not depend on `-chunk`. Gzipped inputs are supported, and fasta reads are sampled with [seqkit][12]. Methods for sampling reads can be compared with `python benchmarks/bench_sampling.py`.
+
+### pop
+Calculates population-genetic estimates from a distance matrix (e.g. from `skmer reference`) and an annotation file assigning each sample to a population.
+```
+skmer pop dist-mat.txt annotations.tsv -o results/prefix
+```
+The annotation file is a tab-separated file with one `sample<TAB>population` row per sample (a header row is allowed, and sample names may omit their file extension). For every population, `pop` computes theta (_π_, the mean pairwise distance between samples of the population), and for every pair of populations it computes Dxy (the mean pairwise distance between samples of the two populations) and Fst. Three Fst estimators are reported, where π<sub>s</sub> is the mean of the two populations' thetas and π<sub>d</sub> = Dxy − π<sub>s</sub>:
+- **Weir-Cockerham / Hudson-Slatkin-Madison:** π<sub>d</sub> / (π<sub>s</sub> + π<sub>d</sub>)
+- **Slatkin:** π<sub>d</sub> / (2π<sub>s</sub> + π<sub>d</sub>)
+- **Nei / Hudson-Boos-Kaplan:** (π<sub>t</sub> − π<sub>s</sub>) / π<sub>t</sub>, where π<sub>t</sub> is the mean of all pairwise distances within and between the two populations
+
+Output files (tab-separated, rounded to 5 decimals, `NA` where undefined, e.g. for populations with a single sample) are `<prefix>-thetas.txt`, `<prefix>-Dxy.txt`, `<prefix>-NeiFst.txt`, `<prefix>-SlatkinFst.txt` and `<prefix>-WeirCockerhamFst.txt`. By default, the prefix is the distance matrix path without its extension.
 
 ### correct
 Performs correction of subsampled distance matrices obtained for reference genome-skims or assemblies. Since distance matrices are precomputed this step is fast. 
@@ -240,4 +261,4 @@ Check out the following [tutorials][9] for more on how to use Skmer and other to
 [9]: https://github.com/smirarab/tutorials
 [10]: https://jgi.doe.gov/data-and-tools/software-tools/bbtools/bb-tools-user-guide/bbmerge-guide/
 [11]: https://github.com/shahab-sarmashghi/RESPECT
-
+[12]: https://bioinf.shenwei.me/seqkit/

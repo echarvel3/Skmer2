@@ -11,14 +11,15 @@ import multiprocessing as mp
 from skmer import __version__
 from skmer.skmer_functions import reference, distance, query
 from skmer.subsample import subsample, correction
-from skmer.utils import pop
+from skmer.popgen import pop
+from skmer.selftest import selftest
 
 def main():
     # Arguments parser
     parser = argparse.ArgumentParser(description='{0} - Estimating genomic distances between '.format(__version__) +
                                                  'genome-skims',
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    # parser.add_argument('-v', '--version', action='store_true', help='print the current version')
+    parser.add_argument('-v', '--version', action='version', version='skmer {0}'.format(__version__), help='print the current version')
     parser.add_argument('--debug', action='store_true', help='Print the traceback when an exception is raised')
     subparsers = parser.add_subparsers(title='commands',
                                        description='reference   Process a library of reference genome-skims or assemblies\n'
@@ -26,7 +27,9 @@ def main():
                                                    'query       Compare a genome-skim or assembly against a reference library\n'
                                                    'subsample   Performs  subsample on a library of reference genome-skims or assemblies\n'
                                                    'correct     Performs correction of subsampled distance matrices obtained for reference' 
-                                                   ' genome-skims or assemblies'
+                                                   ' genome-skims or assemblies\n'
+                                                   'pop         Calculates theta, Dxy, and Fst for populations in a distance matrix\n'
+                                                   'test        Checks the installation and runs every command on the bundled test data'
                                                    ,
                                        help='Run skmer {commands} [-h] for additional help',
                                        dest='{commands}')
@@ -63,7 +66,8 @@ def main():
                             help='Max number of processors to use [1-{0}]. '.format(mp.cpu_count()) +
                                  'Default for this machine: {0}'.format(mp.cpu_count()), metavar='P')
     parser_ref.add_argument('-r', 
-                            help='Path to reference genome, histogram, or repeat spectra data. Runs ReSkmer equations for repeat-aware distances')
+                            help='Path to reference genome, histogram, or repeat spectra data. Runs ReSkmer equations for repeat-aware distances. '
+                                 'Use "assemblies" if all inputs are assemblies to use their own repeat spectra')
     parser_ref.add_argument('-d', action='store_true', 
                             help='Applies DipSkmer equations for diploid distance')
     parser_ref.add_argument('-theta', type=float, 
@@ -87,7 +91,7 @@ def main():
                              help='Max number of processors to use [1-{0}]. '.format(mp.cpu_count()) +
                                   'Default for this machine: {0}'.format(mp.cpu_count()), metavar='P')
     parser_dist.add_argument('-r', 
-                            help='Path to reference genome, histogram, or repeat spectra data')
+                            help='Path to reference genome, histogram, or repeat spectra data (or "assemblies" if all inputs are assemblies)')
     parser_dist.add_argument('-d', action='store_true',
                             help='Applies DipSkmer equations for diploid distance')
     parser_dist.set_defaults(func=distance)
@@ -115,7 +119,7 @@ def main():
                             help='Max number of processors to use [1-{0}]. '.format(mp.cpu_count()) +
                                  'Default for this machine: {0}'.format(mp.cpu_count()), metavar='P') 
     parser_qry.add_argument('-r', 
-                            help='Path to reference genome, histogram, or repeat spectra data')
+                            help='Path to reference genome, histogram, or repeat spectra data (or "assemblies" if all inputs are assemblies)')
     parser_qry.add_argument('-d', action='store_true', 
                             help='Applies DipSkmer equations for diploid distance')
     parser_qry.add_argument('-theta', type=float, help="uses default theta value to compute diploid coverage")
@@ -134,9 +138,9 @@ def main():
     parser_bt.add_argument('-sub', default=os.path.join(os.getcwd(), 'subsample'),
                             help='Directory of output for subsample replicates. Default: working_directory/subsample')
     parser_bt.add_argument('-fa', action='store_false',
-                            help='Save subsampled genome-skims. Default: false')
+                            help='Keep subsampled genome-skims (by default they are deleted). Default: false')
     parser_bt.add_argument('-msh', action='store_false',
-                            help='Save sketches. Default: false')
+                            help='Keep sketches (by default they are deleted). Default: false')
     parser_bt.add_argument('-k', type=int, choices=list(range(1, 32)), default=31, 
                             help='K-mer length [1-31]. ' + 'Default: 31', metavar='K')
     parser_bt.add_argument('-s', type=int, default=10 ** 5, 
@@ -147,6 +151,9 @@ def main():
                             help='Start index of subsampled replicate (eg 5 for dir rep5). Default: 0')
     parser_bt.add_argument('-b', type=int, default=100, 
                             help='Number of subsampled replicates. Default: 100')    
+    parser_bt.add_argument('-chunk', type=int, choices=list(range(1, 33)), default=10, metavar='N',
+                            help='Number of replicates sampled together with one pass over each input file [1-32]. Larger values read '
+                                 'the inputs fewer times but keep more subsampled files on disk at once. Default: 10')
     parser_bt.add_argument('-c', type=float, default=0.9, 
                             help='Exponent value for subsampling. Default: 0.9')
     parser_bt.add_argument('-e', type=float, 
@@ -157,7 +164,7 @@ def main():
                             help='Max number of processors to use [1-{0}]. '.format(mp.cpu_count()) +
                                  'Default for this machine: {0}'.format(mp.cpu_count()), metavar='P')
     parser_bt.add_argument('-r', 
-                            help='Path to reference genome, histogram, or repeat spectra data')
+                            help='Path to reference genome, histogram, or repeat spectra data (or "assemblies" if all inputs are assemblies)')
     parser_bt.add_argument('-d', action='store_true', 
                             help='Applies dipskmer equations for diploid distance')
     parser_bt.add_argument('-theta', type=float, 
@@ -193,8 +200,25 @@ def main():
     parser_fst.add_argument('annotation', 
                             help='Path to annotation file TSV with the format (sample\tpopulation).')
     parser_fst.add_argument('-o', 
-                            help='Path to output matrices.')
+                            help='Prefix of output files (<prefix>-thetas.txt, -Dxy.txt, -NeiFst.txt, -SlatkinFst.txt, '
+                                 '-WeirCockerhamFst.txt). Default: distance matrix path without extension')
     parser_fst.set_defaults(func=pop)
+
+    # =================================
+    # 'test' command subparser
+    # Description:
+    #   Checks dependencies and runs each
+    #   command on the bundled test data.
+    # =================================
+    parser_test = subparsers.add_parser('test', description='Checks the installation and runs every command on the bundled test data')
+    parser_test.add_argument('--quick', action='store_true',
+                             help='Only check dependencies and run the unit tests (skips running commands on test data)')
+    parser_test.add_argument('--keep', action='store_true',
+                             help='Keep the temporary directory of test outputs')
+    parser_test.add_argument('-p', type=int, choices=list(range(1, mp.cpu_count() + 1)), default=min(2, mp.cpu_count()),
+                             help='Max number of processors to use [1-{0}]. '.format(mp.cpu_count()) +
+                                  'Default: {0}'.format(min(2, mp.cpu_count())), metavar='P')
+    parser_test.set_defaults(func=selftest)
 
     args = parser.parse_args()
 

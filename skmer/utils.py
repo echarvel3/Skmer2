@@ -8,17 +8,15 @@ import pyfastx
 from subprocess import check_output, STDOUT, call, run
 from skmer.config import *
 
-def pop(args):
-    return
-
-import pyfastx
-
 def sequence_stat(sequence):
     total_length = 0
     n_reads = 0
     max_length = 0
 
-    fx = pyfastx.Fastx(sequence)  # autodetect fasta/fastq
+    try:
+        fx = pyfastx.Fastx(sequence)  # autodetect fasta/fastq
+    except RuntimeError:
+        raise ValueError('{0} is not a valid (non-empty) fasta or fastq file'.format(sequence))
     for name, seq, *rest in fx:
         s = seq.upper()
         read_length = s.count("A") + s.count("C") + s.count("G") + s.count("T")
@@ -183,6 +181,13 @@ def count_kmers(sample_dir, sample, sequence, k, nth):
         sys.stderr.write("\033[91m" + '[!WARNING!] {0}.hist already exists. Using existing file.\n'.format(sample) + "\033[0m")
         histo_stderr = open(histo_file).read()
     return(histo_stderr)
+
+def check_all_assemblies(read_len):
+    '''raises an error if any sample is not an assembly (assemblies are assigned a read length of "NA")'''
+    reads = [sample for sample, l in read_len.items() if l != "NA"]
+    if reads:
+        raise ValueError("-r {0} requires all inputs to be genome assemblies, but these look like reads: {1}".format(
+            assemblies_keyword, ", ".join(reads)))
 
 def get_hist_data(lib, sample):
     '''reads a skim's kmer histogram...'''
