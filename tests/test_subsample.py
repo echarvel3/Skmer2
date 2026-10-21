@@ -72,7 +72,7 @@ class TestSampleReads(object):
         assert len(read_names(out)) == 10
 
     def test_uses_seqkit_two_pass_sampling(self, tmp_path, fastq):
-        with mock.patch('skmer.subsample.subsample.which', return_value='/bin/seqkit'), mock.patch('skmer.subsample.subsample.run') as run:
+        with mock.patch.object(ss, 'which', return_value='/bin/seqkit'), mock.patch.object(ss, 'run') as run:
             ss.sample_reads(fastq, 11, 20, str(tmp_path / 'bs'))
         assert run.call_args[0][0] == ['seqkit', 'sample', '-n', '20', '-s', '11', '-2', '-j', '1', '-o', str(tmp_path / 'bs' / 's.fastq'), fastq]
         assert run.call_args[1]['check'] is True
@@ -80,12 +80,12 @@ class TestSampleReads(object):
 
     def test_output_name_drops_gz_extension(self, tmp_path):
         gz = write_fastq(tmp_path / 's.fastq.gz', reads)
-        with mock.patch('skmer.subsample.subsample.which', return_value='/bin/seqkit'), mock.patch('skmer.subsample.subsample.run') as run:
+        with mock.patch.object(ss, 'which', return_value='/bin/seqkit'), mock.patch.object(ss, 'run') as run:
             ss.sample_reads(gz, 1, 5, str(tmp_path / 'bs'))
         assert run.call_args[0][0][run.call_args[0][0].index('-o') + 1] == str(tmp_path / 'bs' / 's.fastq')
 
     def test_falls_back_to_python_without_seqkit(self, tmp_path, fastq, capsys):
-        with mock.patch('skmer.subsample.subsample.which', return_value=None):
+        with mock.patch.object(ss, 'which', return_value=None):
             ss.sample_reads(fastq, 1, 10, str(tmp_path / 'bs'))
         assert len(read_names(tmp_path / 'bs' / 's.fastq')) == 10
         assert 'seqkit not found' in capsys.readouterr().err
