@@ -92,3 +92,18 @@ def test_exceptions_print_message_without_traceback(monkeypatch, capsys):
     finally:
         sys.excepthook = hook
     assert 'ValueError: bad input' in capsys.readouterr().out
+
+@pytest.mark.parametrize('argv', [['--help'], ['--version'], ['reference', '--help'], ['subsample', '-h']])
+def test_help_does_not_import_slow_libraries(argv):
+    import subprocess
+    code = ("import sys\nfrom skmer.__main__ import main\nsys.argv = ['skmer'] + {0!r}\n"
+            "try:\n    main()\nexcept SystemExit:\n    pass\n"
+            "slow = [m for m in ['pandas', 'numpy', 'scipy', 'pyfastx'] if m in sys.modules]\nprint('SLOW', slow)").format(argv)
+    out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
+    assert 'SLOW []' in out.stdout, out.stdout + out.stderr
+
+def test_commands_import_their_modules_when_run(monkeypatch):
+    for name, target in [('reference', 'skmer.skmer_functions.reference'), ('pop', 'skmer.popgen.pop'), ('selftest', 'skmer.selftest.selftest')]:
+        with mock.patch(target) as run:
+            getattr(cli, name)('args')
+        run.assert_called_once_with('args')

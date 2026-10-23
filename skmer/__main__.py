@@ -1,18 +1,42 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import numpy as np
-from numpy import random
 import argparse
 import os
 import sys
 import multiprocessing as mp
 
 from skmer import __version__
-from skmer.skmer_functions import reference, distance, query
-from skmer.subsample import subsample, correction
-from skmer.popgen import pop
-from skmer.selftest import selftest
+
+# NOTE: command modules import pandas, numpy, and scipy, which are slow to load. They are imported
+# when a command runs, so that "skmer --help" and argument errors are fast.
+def reference(args):
+    from skmer.skmer_functions import reference as run
+    return run(args)
+
+def distance(args):
+    from skmer.skmer_functions import distance as run
+    return run(args)
+
+def query(args):
+    from skmer.skmer_functions import query as run
+    return run(args)
+
+def subsample(args):
+    from skmer.subsample import subsample as run
+    return run(args)
+
+def correction(args):
+    from skmer.subsample import correction as run
+    return run(args)
+
+def pop(args):
+    from skmer.popgen import pop as run
+    return run(args)
+
+def selftest(args):
+    from skmer.selftest import selftest as run
+    return run(args)
 
 def main():
     # Arguments parser
